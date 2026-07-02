@@ -3,9 +3,39 @@ import os
 from together import Together
 from utils import *
 
+# ==========================
+# Simple Login System
+# ==========================
 
-#---------set css-------------#
-#st.markdown(btn_css, unsafe_allow_html=True)
+def login():
+    st.title("🔐 FMI Reflection Journal AI")
+
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Login"):
+        users = {
+            "fmi": "password123",
+        }
+
+        if username in users and users[username] == password:
+            st.session_state.logged_in = True
+            st.session_state.username = username
+            st.success("Login successful")
+            st.rerun()
+        else:
+            st.error("Invalid username or password")
+
+
+# Initialize login state
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+
+# Show login page if not authenticated
+if not st.session_state.logged_in:
+    login()
+    st.stop()
 
 #--- Initialize the Together Client with the API key ----#
 # Automatically checks Environment Variables or Streamlit secrets.toml
