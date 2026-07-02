@@ -1,2 +1,5 @@
 together
-streamlit   
+streamlit 
+pypdf  
+mammoth
+xhtml2pdf
