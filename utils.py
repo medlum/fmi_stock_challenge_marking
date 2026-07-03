@@ -4,7 +4,6 @@ import shutil
 import re
 import pandas as pd
 import streamlit as st
-#from docx import Document
 from pypdf import PdfReader
 import mammoth
 from xhtml2pdf import pisa
@@ -12,6 +11,102 @@ import io
 import uuid
 import ast
 import json
+
+# Add this near the top of utils.py with your other configurations
+MODEL_PRICING = {
+    # Prices are in USD per 1,000,000 tokens. Update these to match Together AI's current rates!
+    "Qwen/Qwen3-235B-A22B-Instruct-2507-tput": {"input": 0.20, "output": 0.60}, 
+    "openai/gpt-oss-120b": {"input": 0.15, "output": 0.60},
+    "Qwen/Qwen3.7-Max": {"input": 1.25, "output": 3.75}
+}
+
+# --- Model Configurations ---
+PRIMARY_MODEL = "Qwen/Qwen3-235B-A22B-Instruct-2507-tput"
+MODERATOR_MODEL = "openai/gpt-oss-120b"
+TIEBREAKER_MODEL = "Qwen/Qwen3.7-Max"
+
+TOLERANCES = {
+    "Trading Notes and Decisions (60 marks)": 3,
+    "2 Useful CIQ Pro Functions (20 marks)": 2,
+    "1 Useful InvestingNote Function (10 marks)": 1,
+    "End-of-Challenge Reflection Journal (60 marks)": 3
+}
+
+def check_tolerances(primary_dict, moderator_dict):
+    discrepancies = []
+    for key, tol in TOLERANCES.items():
+        p_score = float(primary_dict.get(key, 0))
+        m_score = float(moderator_dict.get(key, 0))
+        if abs(p_score - m_score) > tol:
+            discrepancies.append(key)
+    return discrepancies
+
+def call_llm(client, model_id, messages):
+    response = client.chat.completions.create(
+        model=model_id,
+        messages=messages,
+        temperature=0.2,
+        max_tokens=4000,
+        top_p=0.7,
+        stream=False,
+    )
+    return response.choices[0].message.content, response.usage
+
+def run_grading_pipeline(client, report_text, key, system_message_primary, system_message_moderator, system_message_tiebreaker, rubric):
+    total_cost = 0.0  # Initialize cost tracker
+    
+    # 1. Primary Marker
+    with st.spinner(f"[{key}] Primary Marker evaluating..."):
+        msg_primary = [
+            {"role": "system", "content": system_message_primary},
+            {"role": "system", "content": f"Here are the marking rubrics: {rubric}"},
+            {"role": "user", "content": f"Mark the following report for student identifier: {key}"},
+            {"role": "user", "content": report_text},
+            {"role": "user", "content": "Mark the report with high standard and be stringent when awarding marks."}
+        ]
+        primary_raw, primary_usage = call_llm(client, PRIMARY_MODEL, msg_primary)
+        total_cost += inference_cost(primary_usage, MODEL_PRICING[PRIMARY_MODEL]["input"], MODEL_PRICING[PRIMARY_MODEL]["output"])
+        primary_dict = safe_parse_dict(primary_raw)
+        
+    # 2. Moderator
+    with st.spinner(f"[{key}] Moderator reviewing..."):
+        msg_moderator = [
+            {"role": "system", "content": system_message_moderator},
+            {"role": "system", "content": f"Here are the marking rubrics: {rubric}"},
+            {"role": "user", "content": f"Student Identifier: {key}\n\nReport:\n{report_text}"},
+            {"role": "user", "content": f"Primary Marker's Evaluation:\n{json.dumps(primary_dict, indent=2)}"},
+            {"role": "user", "content": "Review the primary marker's scores and provide your finalized scores."}
+        ]
+        moderator_raw, mod_usage = call_llm(client, MODERATOR_MODEL, msg_moderator)
+        total_cost += inference_cost(mod_usage, MODEL_PRICING[MODERATOR_MODEL]["input"], MODEL_PRICING[MODERATOR_MODEL]["output"])
+        moderator_dict = safe_parse_dict(moderator_raw)
+        
+    # 3. Check Tolerances
+    discrepancies = check_tolerances(primary_dict, moderator_dict)
+    
+    if not discrepancies:
+        primary_dict["Status"] = "✅ Accepted (Primary & Moderator Agree)"
+        primary_dict["API Cost ($)"] = round(total_cost, 5) # Add cost to dict
+        return primary_dict
+    else:
+        # 4. Tie-breaker
+        with st.spinner(f"[{key}] Tie-Breaker resolving discrepancies..."):
+            msg_tiebreaker = [
+                {"role": "system", "content": system_message_tiebreaker},
+                {"role": "system", "content": f"Here are the marking rubrics: {rubric}"},
+                {"role": "user", "content": f"Student Identifier: {key}\n\nReport:\n{report_text}"},
+                {"role": "user", "content": f"Disputed Components: {', '.join(discrepancies)}"},
+                {"role": "user", "content": f"Primary Marker's Evaluation:\n{json.dumps(primary_dict, indent=2)}"},
+                {"role": "user", "content": f"Moderator's Evaluation:\n{json.dumps(moderator_dict, indent=2)}"},
+                {"role": "user", "content": "Provide the final, definitive scores and feedback."}
+            ]
+            tiebreaker_raw, tb_usage = call_llm(client, TIEBREAKER_MODEL, msg_tiebreaker)
+            total_cost += inference_cost(tb_usage, MODEL_PRICING[TIEBREAKER_MODEL]["input"], MODEL_PRICING[TIEBREAKER_MODEL]["output"])
+            
+            final_dict = safe_parse_dict(tiebreaker_raw)
+            final_dict["Status"] = f"⚖️ Arbitrated (Discrepancies in: {', '.join(discrepancies)})"
+            final_dict["API Cost ($)"] = round(total_cost, 5) # Add cost to dict
+            return final_dict
 
 def inference_cost(usage, input_price, output_price):
     """
@@ -45,13 +140,9 @@ def deidentify_text(text, student_name, sid, sid_map):
 
 def create_pdf_with_highlights(highlighted_html, student_name):
     html_content = f"""
-    <html>
-    <body>
-    <h2>FMI Stock Challenge Evaluation</h2>
-    <p>Student: {student_name}</p>
+    <h1>FMI Stock Challenge Evaluation</h1>
+    <h2>Student: {student_name}</h2>
     {highlighted_html}
-    </body>
-    </html>
     """
     
     result = io.BytesIO()
@@ -88,11 +179,17 @@ def highlight_original_sentences(report_text, feedback_text):
         suggestion = match.group(2).strip()
         
         if original in highlighted_report:
-            annotation_html = f"""
-            <span style="background-color: #ffff99;">{original}</span><br>
-            <span style="color: green; font-style: italic;">💡 Suggestion: {suggestion}</span><br>
-            """
-            highlighted_report = highlighted_report.replace(original, annotation_html)
+            # Original gets the default yellow <mark>
+            # Suggestion gets a custom soft green background with dark green text
+            annotation_html = (
+                f'<mark>{original}</mark> '
+                f'<b>💡 Suggestion:</b> '
+                f'<span style="background-color: #d4edda; color: #155724; padding: 2px 5px; border-radius: 4px; font-style: italic;">{suggestion}</span>'
+            )
+            
+            # Replaces only the first occurrence to prevent overlapping highlights 
+            # if the student wrote the exact same sentence multiple times.
+            highlighted_report = highlighted_report.replace(original, annotation_html, 1)
             
     return highlighted_report
 
@@ -119,7 +216,7 @@ def safe_parse_dict(text):
     if match:
         dict_str = match.group(0)
     else:
-        dict_str = text 
+        dict_str = text  
 
     # 3. Attempt to parse using ast.literal_eval
     try:
@@ -206,10 +303,16 @@ def process_data(data, sid_map):
         '1 Useful InvestingNote Function (10 marks)',
         'End-of-Challenge Reflection Journal (60 marks)',
         'Total', 
-        'Feedback'
+        'API Cost ($)', # <-- Added Cost Column
+        'Status',       # <-- Added Status Column
+        'Summary'
     ]
 
-    return df[cols]
+    # Filter cols to only include those that actually exist in the dataframe 
+    # (prevents errors if a key is somehow missing)
+    valid_cols = [c for c in cols if c in df.columns]
+    
+    return df[valid_cols]
 
 system_message = """
 You are a strict, expert grader for the "FMI Individual Stock Challenge (April 2026)". 
@@ -270,7 +373,8 @@ Return your response as a dictionary with the following structure:
     "2 Useful CIQ Pro Functions (20 marks)": float, 
     "1 Useful InvestingNote Function (10 marks)": float, 
     "End-of-Challenge Reflection Journal (60 marks)": float, 
-    "Feedback": '''Multiline feedback here. Use double quotes inside if quoting report content.'''
+    "Feedback": '''Multiline feedback here. Use double quotes inside if quoting report content.''',
+    "Summary": "A concise, professional summary of the evaluation in strictly less than 100 words."
 }
 
 - Use double quotes (") for all dictionary keys and string values, except for the "Feedback" value.
@@ -278,51 +382,56 @@ Return your response as a dictionary with the following structure:
 - Return only the dictionary and nothing else.
 """
 
-#system_message = """
-#1. Your task is to assess student written assignments for the "FMI Individual Stock Challenge (April 2026)" using a structured marking rubric.
-#
-#2. Follow these marking guidelines:
-#    - Refer closely to the rubric and assign marks per criterion, without exceeding maximum scores.
-#    - The total marks for the assignment is 150.
-#    - Assign marks with appropriate variation to reflect the quality of each response—avoid giving uniform or overly rounded scores unless well justified.
-#    - Maintain a high academic standard in grading and feedback.
-#    - Justify all marks with clear, evidence-based reasoning.
-#    - Verify if the student covered the 5 compulsory financial instruments (Large Cap, Penny Stock, REITs, Structured Warrant, DLC) and executed at least 16 trades.
-#
-#3. Provide detailed, constructive feedback:
-#    - Structure feedback using line breaks for each major rubric criterion. Use paragraph spacing for clarity.
-#    - Always refer to “the report” or “the journal” (not “the student”) in your comments.
-#    - Include at least one direct quote from the report per rubric criterion that requires improvement.
-#    - For each quote, suggest a revised version that improves formality, clarity, specificity, or conciseness.
-#    - Follow this format for all sentence-level improvements:
-#    
-#        Original: "quoted sentence from the report"  
-#        Suggestion: "formal, refined version of the sentence"
-#
-#    - Apply structured frameworks or specific financial terminology where relevant.
-#    
-#    Examples:
-#        Original: "I bought DBS because it went up."  
-#        Suggestion: "I initiated a long position in DBS Group Holdings (Large Cap) due to its strong fundamental performance and bullish technical breakout above the 50-day moving average."
-#
-#        Original: "I used CIQ Pro to look at stocks."  
-#        Suggestion: "I utilized the 'Relative Valuation' function in CIQ Pro to compare the P/E and P/B multiples of local REITs against their historical averages, which guided my entry points."
-#
-#        Original: "I lost money at first but then I won."  
-#        Suggestion: "Initial trading decisions resulted in capital drawdown due to a lack of risk management. However, by implementing strict stop-loss orders and diversifying into Daily Leverage Certificates (DLCs), I successfully recovered and outperformed the STI."
-#
-#   4. Return your response as a dictionary with the following structure:
-#        {    
-#            "Student Name": str,
-#            "Trading Notes and Decisions (60 marks)": float, 
-#            "2 Useful CIQ Pro Functions (20 marks)": float, 
-#            "1 Useful InvestingNote Function (10 marks)": float, 
-#            "End-of-Challenge Reflection Journal (60 marks)": float, 
-#            "Feedback": '''Multiline feedback here. Use double quotes inside if quoting student content.'''        
-#        }
-#    - Use double quotes (") for all dictionary keys and string values, except for the "Feedback" value.
-#    - Enclose the "Feedback" value in triple single quotes (''') to preserve formatting and line breaks.
-#    - Return only the dictionary and nothing else.
-#"""
-#
-#
+system_message_moderator = """
+You are an expert grading moderator for the "FMI Individual Stock Challenge (April 2026)". 
+Your task is to review the evaluation provided by the Primary Marker and ensure the scores are fair, strict, and aligned with the rubric.
+You will receive the student's report, the rubric, and the Primary Marker's scores and feedback.
+
+INSTRUCTIONS:
+1. Independently assess the 4 components based on the report and rubric.
+2. Compare your assessment with the Primary Marker's scores.
+3. Output your final agreed-upon scores. If you completely agree with the Primary Marker, output their exact scores. If you disagree, output your corrected scores.
+4. Provide a brief "Moderator Notes" explaining any discrepancies or confirming the accuracy of the Primary Marker.
+
+### OUTPUT FORMAT:
+Return your response as a dictionary with the following structure:
+{    
+    "Student Name": str,
+    "Trading Notes and Decisions (60 marks)": float, 
+    "2 Useful CIQ Pro Functions (20 marks)": float, 
+    "1 Useful InvestingNote Function (10 marks)": float, 
+    "End-of-Challenge Reflection Journal (60 marks)": float, 
+    "Feedback": '''The original feedback from the Primary Marker, optionally refined if you changed the scores significantly.''',
+    "Moderator Notes": "Brief explanation of your review and any score adjustments.",
+    "Summary": "A concise, professional summary of the evaluation in strictly less than 100 words."
+}
+- Use double quotes (") for all dictionary keys and string values, except for the "Feedback" value.
+- Enclose the "Feedback" value in triple single quotes (''') to preserve formatting and line breaks.
+- Return only the dictionary and nothing else.
+"""
+
+system_message_tiebreaker = """
+You are the final expert arbiter for the "FMI Individual Stock Challenge (April 2026)".
+Two previous graders (a Primary Marker and a Moderator) have evaluated the student's report but disagreed on certain components beyond the acceptable tolerance.
+You will receive the student's report, the rubric, the Primary Marker's evaluation, and the Moderator's evaluation.
+
+INSTRUCTIONS:
+1. Review the disputed components carefully based on the rubric and the report.
+2. Assign the final, definitive scores for ALL 4 components.
+3. Provide comprehensive, high-quality feedback that reflects your final scoring.
+
+### OUTPUT FORMAT:
+Return your response as a dictionary with the following structure:
+{    
+    "Student Name": str,
+    "Trading Notes and Decisions (60 marks)": float, 
+    "2 Useful CIQ Pro Functions (20 marks)": float, 
+    "1 Useful InvestingNote Function (10 marks)": float, 
+    "End-of-Challenge Reflection Journal (60 marks)": float, 
+    "Feedback": '''Final comprehensive feedback.''',
+    "Summary": "A concise, professional summary of the evaluation in strictly less than 100 words."
+}
+- Use double quotes (") for all dictionary keys and string values, except for the "Feedback" value.
+- Enclose the "Feedback" value in triple single quotes (''') to preserve formatting and line breaks.
+- Return only the dictionary and nothing else.
+"""
