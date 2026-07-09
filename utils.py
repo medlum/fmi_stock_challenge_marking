@@ -429,7 +429,7 @@ Return your response as a dictionary with the following structure:
     "1 Useful InvestingNote Function (10 marks)": float, 
     "End-of-Challenge Reflection Journal (60 marks)": float, 
     "Feedback": '''Final comprehensive feedback.''',
-    "Summary": "A concise, professional summary of the evaluation in strictly less than 100 words."
+    "Summary": "A comprehensive summary of the evaluation in strictly less than 200 words."
 }
 - Use double quotes (") for all dictionary keys and string values, except for the "Feedback" value.
 - Enclose the "Feedback" value in triple single quotes (''') to preserve formatting and line breaks.
