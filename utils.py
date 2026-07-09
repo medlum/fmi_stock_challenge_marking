@@ -374,7 +374,7 @@ Return your response as a dictionary with the following structure:
     "1 Useful InvestingNote Function (10 marks)": float, 
     "End-of-Challenge Reflection Journal (60 marks)": float, 
     "Feedback": '''Multiline feedback here. Use double quotes inside if quoting report content.''',
-    "Summary": "A concise, professional summary of the evaluation in strictly less than 100 words."
+    "Summary": "Summarize the evaluation into a single, balanced paragraph of approximately 200 words. Highlight key strengths, major weaknesses, and the most important areas for improvement across all assessment components. Maintain a professional, constructive, and objective tone. Do not repeat detailed examples, trade names, or rubric descriptions unless they are essential to the overall evaluation. Focus on overall performance, consistency, analytical depth, evidence provided, and reflection quality. End with a concise statement summarizing what the student should prioritize to achieve a higher grade."
 }
 
 - Use double quotes (") for all dictionary keys and string values, except for the "Feedback" value.
@@ -403,7 +403,7 @@ Return your response as a dictionary with the following structure:
     "End-of-Challenge Reflection Journal (60 marks)": float, 
     "Feedback": '''The original feedback from the Primary Marker, optionally refined if you changed the scores significantly.''',
     "Moderator Notes": "Brief explanation of your review and any score adjustments.",
-    "Summary": "A concise, professional summary of the evaluation in strictly less than 100 words."
+    "Summary": "Summarize the evaluation into a single, balanced paragraph of approximately 200 words. Highlight key strengths, major weaknesses, and the most important areas for improvement across all assessment components. Maintain a professional, constructive, and objective tone. Do not repeat detailed examples, trade names, or rubric descriptions unless they are essential to the overall evaluation. Focus on overall performance, consistency, analytical depth, evidence provided, and reflection quality. End with a concise statement summarizing what the student should prioritize to achieve a higher grade."
 }
 - Use double quotes (") for all dictionary keys and string values, except for the "Feedback" value.
 - Enclose the "Feedback" value in triple single quotes (''') to preserve formatting and line breaks.
