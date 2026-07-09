@@ -42,15 +42,36 @@ def check_tolerances(primary_dict, moderator_dict):
     return discrepancies
 
 def call_llm(client, model_id, messages):
-    response = client.chat.completions.create(
+    # Call the API with stream=True
+    response_stream = client.chat.completions.create(
         model=model_id,
         messages=messages,
         temperature=0.2,
         max_tokens=4000,
         top_p=0.7,
-        stream=False,
+        stream=True,  # Changed to True
     )
-    return response.choices[0].message.content, response.usage
+    
+    full_content = ""
+    # Together client returns an iterator when streaming is enabled
+    for chunk in response_stream:
+        if hasattr(chunk, 'choices') and len(chunk.choices) > 0:
+            delta = chunk.choices[0].delta
+            if hasattr(delta, 'content') and delta.content:
+                full_content += delta.content
+                
+    # Note: Usage/token tracking object structures can vary across streaming models.
+    # If the chunk loop above doesn't provide a final usage object, 
+    # you may need an alternative way to calculate costs, or mock a dummy usage object.
+    # For now, we mock an empty usage shell to avoid breaking run_grading_pipeline:
+    class MockUsage:
+        prompt_tokens = 0
+        completion_tokens = 0
+        
+    # If the last chunk contains final usage statistics, use that instead:
+    final_usage = getattr(response_stream, 'usage', MockUsage())
+
+    return full_content, final_usage
 
 def run_grading_pipeline(client, report_text, key, system_message_primary, system_message_moderator, system_message_tiebreaker, rubric):
     total_cost = 0.0  # Initialize cost tracker
