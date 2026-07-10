@@ -59,7 +59,7 @@ with st.sidebar:
     st.subheader("FMI Stock Challenge Reflection Journal")
     st.info("""🤖 **Grading Pipeline**
 
-1️⃣ **Primary:** Qwen3  
+1️⃣ **Primary:** MiniMaxAI/MiniMax-M3  
 2️⃣ **Moderator**: GPT-OSS-120B  
 3️⃣ **Tie-Breaker**: Qwen3.7-Max  
 
