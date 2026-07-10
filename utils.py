@@ -47,7 +47,7 @@ def call_llm(client, model_id, messages):
         model=model_id,
         messages=messages,
         temperature=0.2,
-        max_tokens=4000,
+        max_tokens=10000,
         top_p=0.7,
         stream=True,  # Changed to True
     )
@@ -215,41 +215,102 @@ def highlight_original_sentences(report_text, feedback_text):
     return highlighted_report
 
 def safe_parse_dict(text):
-    """
-    Safely extracts and parses a dictionary from LLM text output, 
-    handling markdown blocks, conversational filler, and JSON fallbacks.
-    """
     if not text:
         raise ValueError("Empty response from LLM")
 
-    # 1. Strip Markdown code blocks
+    # 1. Strip Markdown code blocks if the LLM ignored instructions
     text = text.strip()
     if text.startswith("```"):
         lines = text.split('\n')
-        if lines[0].startswith("```"):
-            lines = lines[1:]  
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1] 
+        if lines[0].startswith("```"): lines = lines[1:]  
+        if lines and lines[-1].strip() == "```": lines = lines[:-1] 
         text = '\n'.join(lines).strip()
 
-    # 2. Extract the dictionary block using Regex
+    # 2. Extract the JSON/Dict block
     match = re.search(r'\{.*\}', text, re.DOTALL)
-    if match:
-        dict_str = match.group(0)
-    else:
-        dict_str = text  
+    dict_str = match.group(0) if match else text
 
-    # 3. Attempt to parse using ast.literal_eval
+    # 3. Attempt Strict JSON parsing (Primary method now)
+    try:
+        # Fix common LLM JSON errors like trailing commas
+        cleaned_str = re.sub(r',\s*([\]}])', r'\1', dict_str)
+        return json.loads(cleaned_str)
+    except json.JSONDecodeError:
+        pass
+
+    # 4. Fallback: Attempt Python AST parsing
     try:
         return ast.literal_eval(dict_str)
-    except (SyntaxError, ValueError) as e:
-        # 4. Fallback: Sometimes LLMs output strict JSON
-        try:
-            return json.loads(dict_str)
-        except json.JSONDecodeError:
-            pass
+    except (SyntaxError, ValueError):
+        pass
+
+    # 5. LAST RESORT: Regex Extraction for broken/truncated outputs
+    try:
+        def extract_str(key, default=""):
+            # Matches "Key": "Value" or "Key": '''Value''' or "Key": """Value"""
+            pattern = rf'"{key}"\s*:\s*(?:f?"""(.*?)"""|f?\'\'\'(.*?)\'\'\'|"(.*?)")'
+            m = re.search(pattern, dict_str, re.DOTALL | re.IGNORECASE)
+            if m: return m.group(1) or m.group(2) or m.group(3) or default
+            return default
+
+        def extract_num(key, default=0.0):
+            pattern = rf'"{key}"\s*:\s*([\d\.]+)'
+            m = re.search(pattern, dict_str, re.IGNORECASE)
+            if m: return float(m.group(1))
+            return default
+
+        parsed_dict = {
+            "Student Name": extract_str("Student Name", "Unknown"),
+            "Trading Notes and Decisions (60 marks)": extract_num("Trading Notes and Decisions \(60 marks\)"),
+            "2 Useful CIQ Pro Functions (20 marks)": extract_num("2 Useful CIQ Pro Functions \(20 marks\)"),
+            "1 Useful InvestingNote Function (10 marks)": extract_num("1 Useful InvestingNote Function \(10 marks\)"),
+            "End-of-Challenge Reflection Journal (60 marks)": extract_num("End-of-Challenge Reflection Journal \(60 marks\)"),
+            "Feedback": extract_str("Feedback", "Feedback could not be parsed."),
+            "Summary": extract_str("Summary", "Summary could not be parsed.")
+        }
+        if "Moderator Notes" in dict_str:
+            parsed_dict["Moderator Notes"] = extract_str("Moderator Notes", "")
             
-        raise ValueError(f"Failed to parse dictionary. AST Error: {e}\nRaw string snippet: {dict_str[:200]}...")
+        return parsed_dict
+    except Exception:
+        raise ValueError(f"Failed to parse dictionary via all methods. Raw snippet: {dict_str[:200]}...")
+
+#def safe_parse_dict(text):
+#    """
+#    Safely extracts and parses a dictionary from LLM text output, 
+#    handling markdown blocks, conversational filler, and JSON fallbacks.
+#    """
+#    if not text:
+#        raise ValueError("Empty response from LLM")
+#
+#    # 1. Strip Markdown code blocks
+#    text = text.strip()
+#    if text.startswith("```"):
+#        lines = text.split('\n')
+#        if lines[0].startswith("```"):
+#            lines = lines[1:]  
+#        if lines and lines[-1].strip() == "```":
+#            lines = lines[:-1] 
+#        text = '\n'.join(lines).strip()
+#
+#    # 2. Extract the dictionary block using Regex
+#    match = re.search(r'\{.*\}', text, re.DOTALL)
+#    if match:
+#        dict_str = match.group(0)
+#    else:
+#        dict_str = text  
+#
+#    # 3. Attempt to parse using ast.literal_eval
+#    try:
+#        return ast.literal_eval(dict_str)
+#    except (SyntaxError, ValueError) as e:
+#        # 4. Fallback: Sometimes LLMs output strict JSON
+#        try:
+#            return json.loads(dict_str)
+#        except json.JSONDecodeError:
+#            pass
+#            
+#        raise ValueError(f"Failed to parse dictionary. AST Error: {e}\nRaw string snippet: {dict_str[:200]}...")
 
 def extract_and_read_files(zip_path):
     # Initialize user_id in session state if it doesn't exist yet
