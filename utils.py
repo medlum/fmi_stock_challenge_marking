@@ -15,13 +15,14 @@ import json
 # Add this near the top of utils.py with your other configurations
 MODEL_PRICING = {
     # Prices are in USD per 1,000,000 tokens. Update these to match Together AI's current rates!
-    "Qwen/Qwen3-235B-A22B-Instruct-2507-tput": {"input": 0.20, "output": 0.60}, 
+    #"Qwen/Qwen3-235B-A22B-Instruct-2507-tput": {"input": 0.20, "output": 0.60},
+    "MiniMaxAI/MiniMax-M3": {"input": 0.30, "output": 1.20}, 
     "openai/gpt-oss-120b": {"input": 0.15, "output": 0.60},
     "Qwen/Qwen3.7-Max": {"input": 1.25, "output": 3.75}
 }
 
 # --- Model Configurations ---
-PRIMARY_MODEL = "Qwen/Qwen3-235B-A22B-Instruct-2507-tput"
+PRIMARY_MODEL = "MiniMaxAI/MiniMax-M3"
 MODERATOR_MODEL = "openai/gpt-oss-120b"
 TIEBREAKER_MODEL = "Qwen/Qwen3.7-Max"
 
