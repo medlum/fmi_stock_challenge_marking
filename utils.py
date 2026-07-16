@@ -21,7 +21,7 @@ MODEL_PRICING = {
 }
 
 # --- Model Configurations ---
-PRIMARY_MODEL = "MiniMaxAI/MiniMax-M3"
+PRIMARY_MODEL = "openai/gpt-oss-120b"
 MODERATOR_MODEL = "openai/gpt-oss-120b"
 TIEBREAKER_MODEL = "Qwen/Qwen3.7-Max"
 
