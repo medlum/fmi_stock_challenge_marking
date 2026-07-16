@@ -10,7 +10,7 @@ from utils import (run_grading_pipeline,
                    system_message,
                    system_message_moderator,
                    system_message_tiebreaker)
-
+import traceback
 
 # ==========================
 # Simple Login System
@@ -145,6 +145,7 @@ if group_zip is not None:
                 st.session_state.evaluation_results[key] = final_dict
             except Exception as e:
                 st.error(f"Error generating response: {e}")
+                st.code(traceback.format_exc())
 
         # 4. Display results if evaluation was successful
         if key in st.session_state.evaluation_results:
