@@ -42,11 +42,11 @@ if not st.session_state.logged_in:
 
 #--- Initialize the Together Client with the API key ----#
 # Automatically checks Environment Variables or Streamlit secrets.toml
-api_key = st.secrets.get("TOGETHER_API", None)
+#api_key = st.secrets.get("TOGETHER_API", None)
 
 # Fallback to manual input if not found
-if not api_key:
-    api_key = st.sidebar.text_input("Enter Together API Key", type="password")
+#if not api_key:
+api_key = st.sidebar.text_input("Enter Together API Key", type="password")
 
 if api_key:
     client = Together(api_key=api_key)
