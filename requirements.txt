@@ -1,4 +1,4 @@
-together=2.21.0
+together==2.21.0
 streamlit 
 pypdf  
 mammoth
